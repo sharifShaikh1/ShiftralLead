@@ -116,9 +116,7 @@ async function appendToSheet(data) {
     throw new Error(`Failed to prepend to sheet: ${error.message}`);
   }
 }
-app.get(`/favicon.ico`,(req,res)={
-  res.status(204).end();
-})
+
 async function updateRow(rowIndex, data) {
   try {
     console.log(`Updating row ${rowIndex} with data: ${JSON.stringify(data)}`);
@@ -153,9 +151,7 @@ async function sendEmail(to, subject, body) {
 }
 
 // Serve index.html for the root route
-app.get('/', (req, res) => {
-  res.sendFile(path.join(__dirname, frontendPath, 'index.html'));
-});
+
 app.get('/google-maps-api', async (req, res) => {
   try {
     const apiKey = process.env.GOOGLE_MAPS_API_KEY;
