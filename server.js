@@ -43,7 +43,7 @@ app.use(cookieParser());
 
 // Google Sheets setup
 const auth = new google.auth.GoogleAuth({
-  keyFile: path.join(__dirname, 'shiftraa-moving-credentials.json'),
+  credentials:JSON.parse(process.env.GOOGLE_CREDENTIALS),
   scopes: ['https://www.googleapis.com/auth/spreadsheets'],
 });
 const sheets = google.sheets({ version: 'v4', auth });
