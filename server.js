@@ -106,7 +106,7 @@ async function appendToSheet(data) {
     // Step 3: Write the new data into the newly inserted row (row 2)
     await sheets.spreadsheets.values.update({
       spreadsheetId,
-      range: `Sheet1!A2:S2`, // helps to insert data at row 2
+      range: `Sheet1!A2:T2`, // helps to insert data at row 2
       valueInputOption: 'RAW',
       resource: { values: [data] },
     });
@@ -122,7 +122,7 @@ async function updateRow(rowIndex, data) {
     console.log(`Updating row ${rowIndex} with data: ${JSON.stringify(data)}`);
     await sheets.spreadsheets.values.update({
       spreadsheetId,
-      range: `Sheet1!A${rowIndex}:S${rowIndex}`,
+      range: `Sheet1!A${rowIndex}:T${rowIndex}`,
       valueInputOption: 'RAW',
       resource: { values: [data] },
     });
@@ -239,6 +239,7 @@ app.post('/submit-quote', async (req, res) => {
       new_country || '',
       to_city_international || '',
       estimated_cost || 'N/A',
+      data.distance || ''
     ];
 
     console.log('Prepared sheetData:', sheetData);
@@ -256,6 +257,10 @@ app.post('/submit-quote', async (req, res) => {
       <p><strong>Moving Date:</strong> ${sheetData[8]}</p>
       <p><strong>Requirements:</strong> ${sheetData[9]}</p>
     `;
+    if(submissionPart == '1' && move_scope ==='Domestic'){
+      emailToOwnerBody += `
+      <p><strong>Distance</strong>${sheetData[19] || 'Not Calculated'} </p>`;
+    }
     if (submissionPart === '2') {
       if (move_scope === 'Local') {
         emailToOwnerBody += `
@@ -266,6 +271,7 @@ app.post('/submit-quote', async (req, res) => {
         emailToOwnerBody += `
           <p><strong>Current City:</strong> ${sheetData[12]}</p>
           <p><strong>New City:</strong> ${sheetData[13]}</p>
+          <p><strong>Distance:</strong> ${sheetData[19] || 'Not calculated'}</p>
         `;
       } else if (move_scope === 'International') {
         emailToOwnerBody += `
@@ -286,7 +292,7 @@ app.post('/submit-quote', async (req, res) => {
       console.log(`Row found at index ${rowIndex}, fetching existing data`);
       const existingRow = (await sheets.spreadsheets.values.get({
         spreadsheetId,
-        range: `Sheet1!A${rowIndex}:S${rowIndex}`,
+        range: `Sheet1!A${rowIndex}:T${rowIndex}`,
       })).data.values[0];
 
       console.log('Existing row data:', existingRow);
@@ -311,6 +317,7 @@ app.post('/submit-quote', async (req, res) => {
         new_country || existingRow[16] || '',
         to_city_international || existingRow[17] || '',
         estimated_cost || existingRow[18] || '',
+        data.distance || existingRow[19] || '',
       ];
 
       console.log('Updated sheetData for existing row:', sheetData);
