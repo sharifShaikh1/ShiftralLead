@@ -7,6 +7,8 @@ const { v4: uuidv4 } = require('uuid');
 const { SendMailClient } = require('zeptomail');
 const cookieParser = require('cookie-parser');
 const axios = require('axios');
+const rateLimit = require('express-rate-limit');
+const NodeCache = require('node-cache');
 // Load environment variables
 dotenv.config();
 
@@ -150,17 +152,30 @@ throw new Error(`Failed to send email to ${to}: ${error.message}`);
 }
 
 // Serve index.html for the root route
+const googleMapsApiLimiter=rateLimit({
+    windowMs: 15 * 60 * 1000, // 15 minutes
+    max: 100, // 100 requests per window
+    message: 'Too many requests, please try again later.'
+});
 
-app.get('/google-maps-api', async (req, res) => {
-try {
+
+const cache = new NodeCache({ stdTTL: 24 * 60 * 60 }); // Cache for 24 hours
+app.get('/google-maps-api',googleMapsApiLimiter, async (req, res) => {
+const cachekey = 'google-maps-api-script';
+const cachedScript = cache.get(cachekey);
+if (cachedScript) {
+    res.set('Content-Type' , 'application/javascript');
+    return res.send(cachedScript);
+}
+
+    try {
 const apiKey = process.env.GOOGLE_MAPS_API_KEY;
 if (!apiKey) {
 return res.status(500).json({ error: 'API key not configured on the server' });
 }
-
 const googleMapsUrl = `https://maps.googleapis.com/maps/api/js?key=${apiKey}&libraries=places,core&callback=onGoogleMapsApiLoaded&loading=async`;
 const response = await axios.get(googleMapsUrl, { responseType: 'text' });
-
+cache.set(cachekey, response.data);
 res.set('Content-Type', 'application/javascript');
 res.send(response.data);
 } catch (error) {
@@ -168,6 +183,62 @@ console.error('Error fetching Google Maps API script:', error.message);
 res.status(500).json({ error: 'Failed to load Google Maps API script' });
 }
 });
+
+const airportLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000, // 15 minutes
+    max: 100, // Limit each IP to 100 requests per windowMs
+    message: 'Too many requests to the airports API, please try again later.',
+});
+
+// Endpoint to fetch airport data using AviationStack API
+app.get('/api/airports', airportLimiter, async (req, res) => {
+    const { search } = req.query;
+
+    // Validate the search query
+    if (!search) {
+        return res.status(400).json({ error: 'Search query is required' });
+    }
+    const cachekey = `airports-${search}`;
+    const cachedData= cache.get(cachekey);
+    if (cacheData) {
+        return res.json({data:cachedData})
+    }
+
+    try {
+        const apiKey = process.env.AVIATION_STACK_API_KEY;
+        if (!apiKey) {
+            return res.status(500).json({ error: 'AviationStack API key not configured on the server' });
+        }
+
+        // Construct the AviationStack API URL
+        const aviationStackUrl = `http://api.aviationstack.com/v1/airports?access_key=${apiKey}&search=${encodeURIComponent(search)}`;
+
+        // Make the request to AviationStack API
+        const response = await axios.get(aviationStackUrl);
+
+        // Check if the response contains data
+        if (!response.data || !response.data.data || response.data.data.length === 0) {
+            return res.status(404).json({ error: 'No airports found for the given search term' });
+        }
+
+        // Return the airport data
+        res.json({ data: response.data.data });
+    } catch (error) {
+        console.error('Error fetching AviationStack API data:', error.message);
+        if (error.response) {
+            // Handle specific AviationStack API errors
+            if (error.response.status === 429) {
+                return res.status(429).json({ error: 'AviationStack API rate limit exceeded, please try again later' });
+            }
+            if (error.response.status === 401) {
+                return res.status(401).json({ error: 'Invalid AviationStack API key' });
+            }
+        }
+        // General error fallback
+        res.status(500).json({ error: 'Failed to fetch airport data' });
+    }
+});
+
 // POST endpoint to handle form submission
 // In server.js
 
