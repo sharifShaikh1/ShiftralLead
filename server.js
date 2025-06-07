@@ -7,8 +7,6 @@ const { v4: uuidv4 } = require('uuid');
 const { SendMailClient } = require('zeptomail');
 const cookieParser = require('cookie-parser');
 const axios = require('axios');
-const uuidv4 = require('uuid/v4');
-
 // Load environment variables
 dotenv.config();
 
