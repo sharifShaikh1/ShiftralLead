@@ -7,6 +7,7 @@ const { v4: uuidv4 } = require('uuid');
 const { SendMailClient } = require('zeptomail');
 const cookieParser = require('cookie-parser');
 const axios = require('axios');
+const uuidv4 = require('uuid/v4');
 
 // Load environment variables
 dotenv.config();
@@ -180,12 +181,13 @@ app.post('/submit-quote', async (req, res) => {
             return res.status(400).json({ message: 'Missing or invalid data/part in request' });
         }
         
-        // FIX: This is the single source of truth for the session.
-        // It reads the cookie sent by the browser. If it doesn't exist, it creates a new one.
-        let uuid = req.cookies.shiftraa_uuid || uuidv4();
+        // Check for UUID in cookie first, then in request body, otherwise generate a new one
+        let uuid = req.cookies.shiftraa_uuid || data.uuid || uuidv4();
         console.log(`Processing request with UUID: ${uuid}`);
+        console.log("Cookies received:", req.cookies); // Debug: Log received cookies
+        console.log("UUID from request body (if any):", data.uuid); // Debug: Log UUID from body
 
-        // This defines the exact order of columns in your Google Sheet.
+        // Define the exact order of columns in your Google Sheet
         const sheetColumns = [
             'uuid', 'timestamp', 'name', 'phone', 'email', 'move_scope', 
             'home_type_details', 'vehicle_selection', 'moving_date', 'requirements', 
@@ -209,22 +211,19 @@ app.post('/submit-quote', async (req, res) => {
                 existingData[col] = existingRowValues[i] || '';
             });
             
-            // FIX: Correctly merge new data over existing data.
             finalData = { ...existingData, ...data, uuid: uuid };
-
         } else {
             console.log(`Part 1 (or new session): Preparing new data.`);
             finalData = { ...data, uuid: uuid, timestamp: new Date().toISOString() };
         }
         
-        // Map the final data object to an array in the correct column order.
+        // Map the final data object to an array in the correct column order
         const sheetData = sheetColumns.map(colName => {
-// Special handling for the combined phone number field
-if (colName === 'phone' && finalData.phone_country_code && finalData.phone_number) {
-return `${finalData.phone_country_code}${finalData.phone_number}`;
-}
-return finalData[colName] || '';
-});
+            if (colName === 'phone' && finalData.phone_country_code && finalData.phone_number) {
+                return `${finalData.phone_country_code}${finalData.phone_number}`;
+            }
+            return finalData[colName] || '';
+        });
 
         console.log('Final data for sheet:', sheetData);
         
@@ -234,29 +233,103 @@ return finalData[colName] || '';
             await appendToSheet(sheetData);
         }
         
-        // Set the cookie on Part 1 to track the user for Part 2.
+        // Set the cookie on Part 1 to track the user for Part 2
         if (part === '1') {
             res.cookie('shiftraa_uuid', uuid, {
                 httpOnly: true,
                 secure: process.env.NODE_ENV === 'production',
-                // FIX: This is required for cross-domain cookies to work.
                 sameSite: 'None',
                 maxAge: 24 * 60 * 60 * 1000, // 1 day
                 path: '/'
             });
+            console.log(`Set cookie 'shiftraa_uuid' with value: ${uuid}`); // Debug: Log cookie set
         }
         
-        // Clear the cookie after the final step (Part 2) is completed.
+        // Email sending logic
+        const emailBodyOwnerPart1 = `
+            New Lead (Part 1) - ${finalData.move_scope} Move\n
+            UUID: ${uuid}\n
+            Name: ${finalData.name || 'Not Provided'}\n
+            Phone: ${finalData.phone || 'Not Provided'}\n
+            Email: ${finalData.email || 'Not Provided'}\n
+            Move Scope: ${finalData.move_scope || 'Not Provided'}\n
+            Home Type: ${finalData.home_type_details || 'Not Provided'}\n
+            Vehicle Selection: ${finalData.vehicle_selection || 'Not Provided'}\n
+            Moving Date: ${finalData.moving_date || 'Not Provided'}\n
+            Estimated Cost: ${finalData.estimated_cost || 'Not Provided'}\n
+            Distance: ${finalData.distance || 'Not Provided'}
+        `;
+
+        const emailBodyOwnerPart2 = `
+            Lead Updated (Part 2) - ${finalData.move_scope} Move\n
+            UUID: ${uuid}\n
+            Name: ${finalData.name || 'Not Provided'}\n
+            Phone: ${finalData.phone || 'Not Provided'}\n
+            Email: ${finalData.email || 'Not Provided'}\n
+            Move Scope: ${finalData.move_scope || 'Not Provided'}\n
+            Home Type: ${finalData.home_type_details || 'Not Provided'}\n
+            Vehicle Selection: ${finalData.vehicle_selection || 'Not Provided'}\n
+            Moving Date: ${finalData.moving_date || 'Not Provided'}\n
+            Current Address: ${finalData.current_address || 'Not Provided'}\n
+            New Address: ${finalData.new_address || 'Not Provided'}\n
+            Current City: ${finalData.current_city || 'Not Provided'}\n
+            New City: ${finalData.new_city || 'Not Provided'}\n
+            From Country: ${finalData.current_country || 'Not Provided'}\n
+            From City: ${finalData.from_city_international || 'Not Provided'}\n
+            To Country: ${finalData.new_country || 'Not Provided'}\n
+            To City: ${finalData.to_city_international || 'Not Provided'}\n
+            Requirements: ${finalData.requirements || 'Not Provided'}\n
+            Estimated Cost: ${finalData.estimated_cost || 'Not Provided'}\n
+            Distance: ${finalData.distance || 'Not Provided'}
+        `;
+
+        const emailBodyUser = `
+            Thank You for Your Request - Shiftraa Moving\n
+            Dear ${finalData.name || 'Customer'},\n
+            Thank you for submitting your moving request with Shiftraa Moving. Below are the details of your request:\n
+            Move Scope: ${finalData.move_scope || 'Not Provided'}\n
+            Home Type: ${finalData.home_type_details || 'Not Provided'}\n
+            Vehicle Selection: ${finalData.vehicle_selection || 'Not Provided'}\n
+            Moving Date: ${finalData.moving_date || 'Not Provided'}\n
+            Current Address: ${finalData.current_address || 'Not Provided'}\n
+            New Address: ${finalData.new_address || 'Not Provided'}\n
+            Current City: ${finalData.current_city || 'Not Provided'}\n
+            New City: ${finalData.new_city || 'Not Provided'}\n
+            From Country: ${finalData.current_country || 'Not Provided'}\n
+            From City: ${finalData.from_city_international || 'Not Provided'}\n
+            To Country: ${finalData.new_country || 'Not Provided'}\n
+            To City: ${finalData.to_city_international || 'Not Provided'}\n
+            Requirements: ${finalData.requirements || 'Not Provided'}\n
+            Estimated Cost: ${finalData.estimated_cost || 'Not Provided'}\n
+            Distance: ${finalData.distance || 'Not Provided'}\n\n
+            Our team will review your request and contact you shortly to discuss the next steps.\n
+            Best regards,\n
+            Shiftraa Moving Team
+        `;
+
+        // Send email to owner after Part 1
+        if (part === '1') {
+            await sendEmail(ownerEmail, `New Lead (Part 1) - ${finalData.move_scope} Move`, emailBodyOwnerPart1);
+        }
+
+        // Send emails after Part 2
         if (part === '2') {
-             res.clearCookie('shiftraa_uuid', { path: '/' });
+            // Send updated lead email to owner
+            await sendEmail(ownerEmail, `Lead Updated (Part 2) - ${finalData.move_scope} Move`, emailBodyOwnerPart2);
+            
+            // Send confirmation email to user (only after Part 2)
+            if (finalData.email) {
+                await sendEmail(finalData.email, `Thank You for Your Request - Shiftraa Moving`, emailBodyUser);
+            }
+
+            // Clear the cookie after Part 2 is completed
+            res.clearCookie('shiftraa_uuid', { path: '/' });
         }
-        
-        // ... your email sending logic remains the same ...
 
         res.status(200).json({
             uuid,
-       message: `Part ${part} submitted successfully`,
-          success: true,
+            message: `Part ${part} submitted successfully`,
+            success: true,
         });
 
     } catch (error) {
